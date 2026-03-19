@@ -1,0 +1,6 @@
+zigbeeManufacturer :
+  - id: "SONOFF/SWV"
+    deviceLabel: SONOFF SWV Water Valve
+    manufacturer: SONOFF
+    model: SWV
+    deviceProfileName: valve-meter-battery

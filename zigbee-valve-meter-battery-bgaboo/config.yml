@@ -1,0 +1,5 @@
+name: 'Zigbee WaterValve and Meter STBgaboo'
+packageKey: 'zigbee-valve-meter-battery-bgaboo'
+description: 'Devices Supported: https://github.com/bgaboo/STbgaboo/blob/main/zigbee-valve-meter-battery-bgaboo/fingerprints.yml'
+permissions:
+  zigbee: {}
