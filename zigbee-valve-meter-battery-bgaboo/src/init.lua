@@ -38,18 +38,22 @@ end
 local function refresh_handler(driver, device)
   print("<<<< [REFRESH] Probing all potential Metering Attributes >>>>")
   
-  -- 1. Standard Polls
+  -- 1. Standard Polls (Using built-in cluster definitions)
   device:send(OnOff.attributes.OnOff:read(device))
   device:send(PowerConfiguration.attributes.BatteryPercentageRemaining:read(device))
   device:send(Basic.attributes.PowerSource:read(device))
 
-  -- 2. AnalogInput (0x000C) Probe - Present Value & Common Sonoff Attr
+  -- 2. AnalogInput (0x000C) Probe
+  -- Read 0x0055 (Standard)
   device:send(AnalogInput.attributes.PresentValue:read(device)) 
-  device:send(zcl_clusters.AnalogInput.attributes:read(device, 0x0051))
+  -- Read 0x0051 (Sonoff Flow) - Corrected Syntax
+  device:send(zcl_clusters.AnalogInput.attributes.PresentValue:read(device):set_attr_id(0x0051))
   
-  -- 3. SimpleMetering (0x0702) Probe - Summation & Water Specific Summation
+  -- 3. SimpleMetering (0x0702) Probe
+  -- Read 0x0000 (Current Summation)
   device:send(SimpleMetering.attributes.CurrentSummationDelivered:read(device))
-  device:send(zcl_clusters.SimpleMetering.attributes:read(device, 0x0100))
+  -- Read 0x0100 (Water Specific) - Corrected Syntax
+  device:send(zcl_clusters.SimpleMetering.attributes.CurrentSummationDelivered:read(device):set_attr_id(0x0100))
 end
 
 local function device_added(self, device)
