@@ -7,12 +7,14 @@ local zcl_clusters = require "st.zigbee.zcl.clusters"
 local capabilities = require "st.capabilities"
 local write = require "writeAttribute"
 
--- Shorten cluster/capability references
+-- ZCL Clusters
 local Basic = zcl_clusters.Basic
 local OnOff = zcl_clusters.OnOff
 local AnalogInput = zcl_clusters.AnalogInput
 local SimpleMetering = zcl_clusters.SimpleMetering
+local PowerConfiguration = zcl_clusters.PowerConfiguration
 
+-- Capabilities
 local battery = capabilities.battery
 local valve = capabilities.valve
 local powerSource = capabilities.powerSource
@@ -23,26 +25,31 @@ local gasMeter = capabilities.gasMeter
 -- HANDLERS
 -------------------------------------------------------------------------------------------
 
--- Handler for Water Flow / Metering (Cluster 0x000C or 0x0702)
+-- Process Flow/Meter reports
 local function flow_report_handler(driver, device, value, zb_rx)
   local raw_flow = value.value
-  print(string.format("<<<< [FLOW REPORT] Device: %s, Value: %.2f >>>>", device.label, raw_flow))
+  print(string.format("<<<< [FLOW SUCCESS] Cluster: 0x%04X, Attr: 0x%04X, Value: %.2f >>>>", zb_rx.address_header.cluster.value, zb_rx.body.zcl_body.attr_id.value, raw_flow))
   
   -- SONOFF SWV-BSP typically reports in Liters (L)
   device:emit_event(gasMeter.gasMeter({value = raw_flow, unit = "L"}))
 end
 
--- Custom Refresh Handler: Forces the hub to ask for the Metering data
+-- Force the device to report all potential metering attributes
 local function refresh_handler(driver, device)
-  print("<<<< [REFRESH] Manually polling Valve, Battery, and Flow clusters >>>>")
+  print("<<<< [REFRESH] Probing all potential Metering Attributes >>>>")
   
-  -- Standard Polls
-  device:send(zcl_clusters.OnOff.attributes.OnOff:read(device))
-  device:send(zcl_clusters.PowerConfiguration.attributes.BatteryPercentageRemaining:read(device))
+  -- 1. Standard Polls
+  device:send(OnOff.attributes.OnOff:read(device))
+  device:send(PowerConfiguration.attributes.BatteryPercentageRemaining:read(device))
+  device:send(Basic.attributes.PowerSource:read(device))
+
+  -- 2. AnalogInput (0x000C) Probe - Present Value & Common Sonoff Attr
+  device:send(AnalogInput.attributes.PresentValue:read(device)) 
+  device:send(zcl_clusters.AnalogInput.attributes:read(device, 0x0051))
   
-  -- Metering Polls (SONOFF specific clusters)
-  device:send(AnalogInput.attributes.PresentValue:read(device))
+  -- 3. SimpleMetering (0x0702) Probe - Summation & Water Specific Summation
   device:send(SimpleMetering.attributes.CurrentSummationDelivered:read(device))
+  device:send(zcl_clusters.SimpleMetering.attributes:read(device, 0x0100))
 end
 
 local function device_added(self, device)
@@ -51,12 +58,12 @@ local function device_added(self, device)
 end
 
 -------------------------------------------------------------------------------------------
--- PREFERENCES & LIFECYCLE
+-- PREFERENCES
 -------------------------------------------------------------------------------------------
 
 local function do_Preferences(self, device, event, args)
   print("<< do_Preferences >>")
-  for id, value in pairs(device.preferences) do
+  for id, _ in pairs(device.preferences) do
     local oldPreferenceValue = args.old_st_store.preferences[id]
     local newParameterValue = device.preferences[id]
     
@@ -91,21 +98,21 @@ local zigbee_valve_driver_template = {
     gasMeter
   },
   
-  -- Map Capability commands to Lua functions
   capability_handlers = {
     [refresh.ID] = {
       [refresh.commands.refresh.NAME] = refresh_handler
     }
   },
   
-  -- Map Zigbee Attribute reports to Lua functions
   zigbee_handlers = {
     attr = {
       [AnalogInput.ID] = {
-        [AnalogInput.attributes.PresentValue.ID] = flow_report_handler
+        [AnalogInput.attributes.PresentValue.ID] = flow_report_handler,
+        [0x0051] = flow_report_handler
       },
       [SimpleMetering.ID] = {
-        [SimpleMetering.attributes.CurrentSummationDelivered.ID] = flow_report_handler
+        [SimpleMetering.attributes.CurrentSummationDelivered.ID] = flow_report_handler,
+        [0x0100] = flow_report_handler
       }
     }
   },
@@ -120,19 +127,7 @@ local zigbee_valve_driver_template = {
         data_type = Basic.attributes.PowerSource.base_type,
         configurable = true
       }
-    },
-    -- Automatic reporting for flow metering (SONOFF specific cluster)
-    [gasMeter.ID] = {
-      {
-        cluster = AnalogInput.ID,
-        attribute = AnalogInput.attributes.PresentValue.ID,
-        minimum_interval = 1,
-        maximum_interval = 300, -- 5 percenként akkor is küldjön adatot, ha nincs változás
-        data_type = AnalogInput.attributes.PresentValue.base_type,
-        reportable_change = 0.1, -- 0.1 liter változásnál már küldjön frissítést
-        configurable = true
-      }
-    }    
+    }
   },
 
   lifecycle_handlers = {
@@ -141,20 +136,17 @@ local zigbee_valve_driver_template = {
     doConfigure = function(self, device)
       print("<<<< [CONFIGURE] Setting up Reporting >>>>")
       device:configure()
-      -- Manually ensure reporting is bound for the AnalogInput cluster
+      -- Try to bind reporting for the most likely flow cluster
       device:add_configured_attribute(AnalogInput.attributes.PresentValue)
       device:add_monitored_attribute(AnalogInput.attributes.PresentValue)
     end
   },
 
-  sub_drivers = {
-    -- Placeholder for future sub-drivers (e.g., Tuya specific)
-  },
+  sub_drivers = {},
   health_check = false,
 }
 
--- Register defaults for Valve and Battery to save code space
 defaults.register_for_default_handlers(zigbee_valve_driver_template, zigbee_valve_driver_template.supported_capabilities)
 
-local zigbee_valve = ZigbeeDriver("zigbee-valve-meter-battery-bgaboo", zigbee_valve_driver_template)
+local zigbee_valve = ZigbeeDriver("SonoffValveMeter", zigbee_valve_driver_template)
 zigbee_valve:run()
