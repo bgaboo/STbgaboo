@@ -44,30 +44,18 @@ local function refresh_handler(driver, device)
   device:send(PowerConfiguration.attributes.BatteryPercentageRemaining:read(device))
   device:send(Basic.attributes.PowerSource:read(device))
 
-  -- 2. AnalogInput (0x000C) Probe
+  -- 2. Probe Sequence using global_commands (Bulletproof method)
+  -- AnalogInput (0x000C)
   device:send(AnalogInput.attributes.PresentValue:read(device)) -- 0x0055
-  -- Force read 0x0051 by overriding the attribute ID on a standard read object
-  local read_0051 = AnalogInput.attributes.PresentValue:read(device)
-  read_0051.body.zcl_body.attr_id.value = 0x0051
-  device:send(read_0051)
+  device:send(zcl_clusters.global_commands.ReadAttribute(device, 0x000C, {0x0051}))
   
-  -- 3. SimpleMetering (0x0702) Probe
+  -- SimpleMetering (0x0702)
   device:send(SimpleMetering.attributes.CurrentSummationDelivered:read(device)) -- 0x0000
-  local read_0100 = SimpleMetering.attributes.CurrentSummationDelivered:read(device)
-  read_0100.body.zcl_body.attr_id.value = 0x0100
-  device:send(read_0100)
+  device:send(zcl_clusters.global_commands.ReadAttribute(device, 0x0702, {0x0100}))
 
-  -- 4. Manufacturer Specific (0xFC11) - Sonoff Private
-  -- We reuse the Basic cluster read and pivot the Cluster ID and Attribute ID
-  local read_fc11_01 = Basic.attributes.ManufacturerName:read(device)
-  read_fc11_01.address_header.cluster.value = 0xFC11
-  read_fc11_01.body.zcl_body.attr_id.value = 0x0001
-  device:send(read_fc11_01)
-
-  local read_fc11_06 = Basic.attributes.ManufacturerName:read(device)
-  read_fc11_06.address_header.cluster.value = 0xFC11
-  read_fc11_06.body.zcl_body.attr_id.value = 0x0006
-  device:send(read_fc11_06)
+  -- Manufacturer Specific (0xFC11)
+  device:send(zcl_clusters.global_commands.ReadAttribute(device, 0xFC11, {0x0001}))
+  device:send(zcl_clusters.global_commands.ReadAttribute(device, 0xFC11, {0x0006}))
 end
 
 local function device_added(self, device)
