@@ -9,8 +9,6 @@ local write = require "writeAttribute"
 local device_management = require "st.zigbee.device_management"
 local messages = require "st.zigbee.messages"
 local zcl_messages = require "st.zigbee.zcl"
--- Explicitly require global commands to stop the Lazy Load error
-local global_commands = require "st.zigbee.zcl.global_commands"
 
 -- ZCL Clusters
 local Basic = zcl_clusters.Basic
@@ -38,23 +36,6 @@ local function flow_report_handler(driver, device, value, zb_rx)
   device:emit_event(gasMeter.gasMeter({value = raw_flow, unit = "L"}))
 end
 
--- Proper way to build a manual Zigbee Read Attribute message
-local function read_attribute_raw(device, cluster_id, attr_id)
-  local addr_header = device_management.build_address_header(device, cluster_id, 1)
-  local zcl_header = zcl_messages.zcl_header.ZCLHeader({
-    cmd = global_commands.ReadAttribute.ID
-  })
-  local read_body = global_commands.ReadAttribute({ attr_id })
-  local message_body = zcl_messages.zcl_message_body.ZCLMessageBody({
-    zcl_header = zcl_header,
-    zcl_body = read_body
-  })
-  return messages.ZigbeeMessageTx({
-    address_header = addr_header,
-    body = message_body
-  })
-end
-
 local function refresh_handler(driver, device)
   print("<<<< [REFRESH] Probing all potential Metering Attributes >>>>")
   
@@ -65,15 +46,30 @@ local function refresh_handler(driver, device)
 
   -- 2. AnalogInput (0x000C) Probe
   device:send(AnalogInput.attributes.PresentValue:read(device)) -- 0x0055
-  device:send(read_attribute_raw(device, 0x000C, 0x0051))       -- 0x0051
+  
+  -- Minimal Fix: Use the built-in read command but swap the Attribute ID
+  local read_0051 = AnalogInput.attributes.PresentValue:read(device)
+  read_0051.body.zcl_body.attr_id.value = 0x0051
+  device:send(read_0051)
   
   -- 3. SimpleMetering (0x0702) Probe
   device:send(SimpleMetering.attributes.CurrentSummationDelivered:read(device)) -- 0x0000
-  device:send(read_attribute_raw(device, 0x0702, 0x0100))                       -- 0x0100
+  
+  local read_0100 = SimpleMetering.attributes.CurrentSummationDelivered:read(device)
+  read_0100.body.zcl_body.attr_id.value = 0x0100
+  device:send(read_0100)
 
   -- 4. Manufacturer Specific (0xFC11) - Sonoff Private
-  device:send(read_attribute_raw(device, 0xFC11, 0x0001))
-  device:send(read_attribute_raw(device, 0xFC11, 0x0006))
+  -- We pivot a standard Basic cluster read to the custom cluster/attr
+  local read_fc11_01 = Basic.attributes.ManufacturerName:read(device)
+  read_fc11_01.address_header.cluster.value = 0xFC11
+  read_fc11_01.body.zcl_body.attr_id.value = 0x0001
+  device:send(read_fc11_01)
+
+  local read_fc11_06 = Basic.attributes.ManufacturerName:read(device)
+  read_fc11_06.address_header.cluster.value = 0xFC11
+  read_fc11_06.body.zcl_body.attr_id.value = 0x0006
+  device:send(read_fc11_06)
 end
 
 local function device_added(self, device)
