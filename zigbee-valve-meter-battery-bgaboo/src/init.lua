@@ -38,16 +38,17 @@ end
 
 -- Proper way to build a manual Zigbee Read Attribute message
 local function read_attribute_raw(device, cluster_id, attr_id)
-  local read_body = zcl_messages.global_commands.ReadAttribute({ attr_id })
-  local header = zcl_messages.zcl_header.ZCLHeader({
-    cmd = zcl_messages.global_commands.ReadAttribute.ID
+  local addr_header = device_management.build_address_header(device, cluster_id)
+  local zcl_header = zcl_messages.zcl_header.ZCLHeader({
+    cmd = zcl_messages.clusters.global_commands.ReadAttribute.ID
   })
+  local read_body = zcl_messages.clusters.global_commands.ReadAttribute({ attr_id })
   local message_body = zcl_messages.zcl_message_body.ZCLMessageBody({
-    zcl_header = header,
+    zcl_header = zcl_header,
     zcl_body = read_body
   })
   return messages.ZigbeeMessageTx({
-    address_header = device_management.build_address_header(device, cluster_id),
+    address_header = addr_header,
     body = message_body
   })
 end
@@ -79,28 +80,26 @@ local function device_added(self, device)
 end
 
 -------------------------------------------------------------------------------------------
--- PREFERENCES (Remaining code is the same as before)
+-- PREFERENCES
 -------------------------------------------------------------------------------------------
 local function do_Preferences(self, device, event, args)
-  print("<< do_Preferences >>")
-  for id, _ in pairs(device.preferences) do
+  print("<< do_Prefrences >>")
+  for id, value in pairs(device.preferences) do
     local oldPreferenceValue = args.old_st_store.preferences[id]
     local newParameterValue = device.preferences[id]
-
     if oldPreferenceValue ~= newParameterValue then
-      print("<< Preference changed name:", id, "old value:", oldPreferenceValue, "new value:", newParameterValue)
+        if id == "restoreState" then
+          print("<<< Write restore state >>>")
+          local value_send = tonumber(newParameterValue)
+          local data_value = {value = value_send, ID = 0x30}
+          local cluster_id = {value = 0x0006}
+          local attr_id = 0x4003
+          write.write_attribute_function(device, cluster_id, attr_id, data_value)
 
-      if id == "restoreState" then
-        local value_send = tonumber(newParameterValue)
-        local data_value = {value = value_send, ID = 0x30}
-        local cluster_id = {value = 0x0006}
-        local attr_id = 0x4003
-        write.write_attribute_function(device, cluster_id, attr_id, data_value)
-
-        if newParameterValue == "255" then data_value = {value = 0x02, ID = 0x30} end
-        attr_id = 0x8002
-        write.write_attribute_function(device, cluster_id, attr_id, data_value)
-      end
+          if newParameterValue == "255" then data_value = {value = 0x02, ID = 0x30} end
+          attr_id = 0x8002
+          write.write_attribute_function(device, cluster_id, attr_id, data_value)
+        end
     end
   end
 end
@@ -137,7 +136,7 @@ local zigbee_valve_driver_template = {
       device:configure()
     end
   },
-  health_check = false -- Minimal change to eliminate warning
+  health_check = false,
 }
 
 defaults.register_for_default_handlers(zigbee_valve_driver_template, zigbee_valve_driver_template.supported_capabilities)
