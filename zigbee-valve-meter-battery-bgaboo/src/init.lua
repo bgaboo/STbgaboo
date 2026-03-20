@@ -38,7 +38,7 @@ end
 local function refresh_handler(driver, device)
   print("<<<< [REFRESH] Probing all potential Metering Attributes >>>>")
   
-  -- 1. Standard Polls (Using built-in cluster definitions)
+  -- 1. Standard Polls
   device:send(OnOff.attributes.OnOff:read(device))
   device:send(PowerConfiguration.attributes.BatteryPercentageRemaining:read(device))
   device:send(Basic.attributes.PowerSource:read(device))
@@ -46,14 +46,19 @@ local function refresh_handler(driver, device)
   -- 2. AnalogInput (0x000C) Probe
   -- Read 0x0055 (Standard)
   device:send(AnalogInput.attributes.PresentValue:read(device)) 
-  -- Read 0x0051 (Sonoff Flow) - Corrected Syntax
-  device:send(zcl_clusters.AnalogInput.attributes.PresentValue:read(device):set_attr_id(0x0051))
   
-  -- 3. SimpleMetering (0x0702) Probe
-  -- Read 0x0000 (Current Summation)
+  -- 3. Manual Read for 0x0051 (Sonoff Alternative)
+  local read_0051 = AnalogInput.attributes.PresentValue:read(device)
+  read_0051.body.zcl_body.attr_id.value = 0x0051
+  device:send(read_0051)
+  
+  -- 4. SimpleMetering (0x0702) Probe
   device:send(SimpleMetering.attributes.CurrentSummationDelivered:read(device))
-  -- Read 0x0100 (Water Specific) - Corrected Syntax
-  device:send(zcl_clusters.SimpleMetering.attributes.CurrentSummationDelivered:read(device):set_attr_id(0x0100))
+  
+  -- 5. Manufacturer Specific (0xFC11) - Very likely for Sonoff
+  -- We'll try to read attribute 0x0001 in their private cluster
+  local mfg_read = zcl_clusters.basic_types.ZclManufacturerFreeAttribute(0xFC11, 0x0001, 0x1286)
+  -- Note: 0x1286 is Sonoff's Manufacturer Code
 end
 
 local function device_added(self, device)
@@ -107,7 +112,7 @@ local zigbee_valve_driver_template = {
       [refresh.commands.refresh.NAME] = refresh_handler
     }
   },
-  
+
   zigbee_handlers = {
     attr = {
       [AnalogInput.ID] = {
@@ -115,8 +120,11 @@ local zigbee_valve_driver_template = {
         [0x0051] = flow_report_handler
       },
       [SimpleMetering.ID] = {
-        [SimpleMetering.attributes.CurrentSummationDelivered.ID] = flow_report_handler,
-        [0x0100] = flow_report_handler
+        [SimpleMetering.attributes.CurrentSummationDelivered.ID] = flow_report_handler
+      },
+      [0xFC11] = {
+         [0x0001] = flow_report_handler, -- Potential Quantitative data
+         [0x0006] = flow_report_handler  -- Potential Flow rate
       }
     }
   },
