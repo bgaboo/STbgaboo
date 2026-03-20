@@ -38,17 +38,17 @@ end
 
 -- Proper way to build a manual Zigbee Read Attribute message
 local function read_attribute_raw(device, cluster_id, attr_id)
-  local addr_header = device_management.build_address_header(device, cluster_id)
+  local read_body = zcl_messages.clusters.global_commands.ReadAttribute({ attr_id })
   local zcl_header = zcl_messages.zcl_header.ZCLHeader({
     cmd = zcl_messages.clusters.global_commands.ReadAttribute.ID
   })
-  local read_body = zcl_messages.clusters.global_commands.ReadAttribute({ attr_id })
   local message_body = zcl_messages.zcl_message_body.ZCLMessageBody({
     zcl_header = zcl_header,
     zcl_body = read_body
   })
+  -- Using device:get_endpoint(1) directly to avoid device_management nil errors
   return messages.ZigbeeMessageTx({
-    address_header = addr_header,
+    address_header = device_management.build_address_header(device, cluster_id, 1),
     body = message_body
   })
 end
